@@ -1,8 +1,8 @@
-use soroban_sdk::{contracttype, Address, Map, String, Symbol};
 use crate::error::ContractError;
+use soroban_sdk::{contracttype, Address, Map, String, Symbol};
 
 /// Blood type enumeration supporting all major blood groups
-/// 
+///
 /// Each variant represents a unique combination of ABO and Rh blood typing:
 /// - A+, A-: Type A with positive/negative Rh factor
 /// - B+, B-: Type B with positive/negative Rh factor  
@@ -62,33 +62,33 @@ pub enum BloodStatus {
 pub struct BloodUnit {
     /// Unique identifier for this blood unit
     pub id: u64,
-    
+
     /// Blood type (A+, A-, B+, B-, AB+, AB-, O+, O-)
     pub blood_type: BloodType,
-    
+
     /// Volume in milliliters (ml)
     /// Standard unit: 450ml ± 10% for whole blood
     /// Typical range: 400-500ml
     pub quantity_ml: u32,
-    
+
     /// Blood bank address that manages this unit
     pub bank_id: Address,
-    
+
     /// Optional donor address (may be anonymous)
     /// None indicates anonymous donation
     pub donor_id: Option<Address>,
-    
+
     /// Unix timestamp (seconds) when donation was collected
     pub donation_timestamp: u64,
-    
+
     /// Unix timestamp (seconds) when unit expires
     /// Typically 42 days from donation for whole blood
     /// 5 days for platelets, 1 year for frozen plasma
     pub expiration_timestamp: u64,
-    
+
     /// Current status in supply chain
     pub status: BloodStatus,
-    
+
     /// Extensible metadata for additional attributes
     /// Examples: test_results, storage_location, lot_number, processing_notes
     pub metadata: Map<Symbol, String>,
@@ -104,32 +104,32 @@ impl BloodType {
     /// - Rh+ can only donate to Rh+
     pub fn can_donate_to(&self, recipient: &BloodType) -> bool {
         use BloodType::*;
-        
+
         match (self, recipient) {
             // O- is universal donor
             (ONegative, _) => true,
-            
+
             // O+ can donate to all positive types
             (OPositive, APositive | BPositive | ABPositive | OPositive) => true,
-            
+
             // A- can donate to A and AB (both + and -)
             (ANegative, APositive | ANegative | ABPositive | ABNegative) => true,
-            
+
             // A+ can donate to A+ and AB+
             (APositive, APositive | ABPositive) => true,
-            
+
             // B- can donate to B and AB (both + and -)
             (BNegative, BPositive | BNegative | ABPositive | ABNegative) => true,
-            
+
             // B+ can donate to B+ and AB+
             (BPositive, BPositive | ABPositive) => true,
-            
+
             // AB- can donate to AB+ and AB-
             (ABNegative, ABPositive | ABNegative) => true,
-            
+
             // AB+ can only donate to AB+
             (ABPositive, ABPositive) => true,
-            
+
             // All other combinations are incompatible
             _ => false,
         }
@@ -147,30 +147,30 @@ impl BloodStatus {
     /// - Expired -> (terminal state)
     pub fn can_transition_to(&self, new_status: &BloodStatus) -> bool {
         use BloodStatus::*;
-        
+
         match (self, new_status) {
             // Available can go to Reserved or Expired
             (Available, Reserved) => true,
             (Available, Expired) => true,
-            
+
             // Reserved can go to InTransit, back to Available, or Expired
             (Reserved, InTransit) => true,
             (Reserved, Available) => true,
             (Reserved, Expired) => true,
-            
+
             // InTransit can go to Delivered or Expired
             (InTransit, Delivered) => true,
             (InTransit, Expired) => true,
-            
+
             // Delivered and Expired are terminal states
             (Delivered, _) => false,
             (Expired, _) => false,
-            
+
             // No other transitions allowed
             _ => false,
         }
     }
-    
+
     /// Check if this status is a terminal state
     pub fn is_terminal(&self) -> bool {
         matches!(self, BloodStatus::Delivered | BloodStatus::Expired)
@@ -189,25 +189,25 @@ impl BloodUnit {
         if self.quantity_ml < 100 || self.quantity_ml > 600 {
             return Err(ContractError::InvalidQuantity);
         }
-        
+
         // Validate timestamps
         if self.expiration_timestamp <= self.donation_timestamp {
             return Err(ContractError::InvalidTimestamp);
         }
-        
+
         // Donation shouldn't be from far future (allow up to 1 hour ahead for clock skew)
         if self.donation_timestamp > current_time + 3600 {
             return Err(ContractError::InvalidTimestamp);
         }
-        
+
         Ok(())
     }
-    
+
     /// Check if blood unit is currently expired
     pub fn is_expired(&self, current_time: u64) -> bool {
         current_time >= self.expiration_timestamp
     }
-    
+
     /// Calculate shelf life remaining in seconds
     pub fn shelf_life_remaining(&self, current_time: u64) -> i64 {
         (self.expiration_timestamp as i64) - (current_time as i64)
@@ -220,35 +220,57 @@ impl BloodUnit {
 pub enum DataKey {
     /// Individual blood unit by ID
     BloodUnit(u64),
-    
+
     /// Counter for generating new blood unit IDs
     BloodUnitCounter,
-    
+
     /// Index: Blood type -> Vec<u64> (blood unit IDs)
     BloodTypeIndex(BloodType),
-    
+
     /// Index: Bank ID -> Vec<u64> (blood unit IDs)
     BankIndex(Address),
-    
+
     /// Index: Status -> Vec<u64> (blood unit IDs)
     StatusIndex(BloodStatus),
-    
+
     /// Index: Donor ID -> Vec<u64> (blood unit IDs)
     DonorIndex(Address),
-    
+
     /// Admin address
     Admin,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct BloodRegisteredEvent {
+    /// Unique ID of the registered blood unit
+    pub blood_unit_id: u64,
+
+    /// Blood bank that registered the unit
+    pub bank_id: Address,
+
+    /// Blood type
+    pub blood_type: BloodType,
+
+    /// Quantity in milliliters
+    pub quantity_ml: u32,
+
+    /// When the unit expires
+    pub expiration_timestamp: u64,
+
+    /// When the unit was registered
+    pub registered_at: u64,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{Env, testutils::Address as _};
+    use soroban_sdk::{testutils::Address as _, Env};
 
     #[test]
     fn test_blood_type_compatibility_universal_donor() {
         let o_neg = BloodType::ONegative;
-        
+
         // O- can donate to all types
         assert!(o_neg.can_donate_to(&BloodType::ONegative));
         assert!(o_neg.can_donate_to(&BloodType::OPositive));
@@ -263,7 +285,7 @@ mod tests {
     #[test]
     fn test_blood_type_compatibility_universal_recipient() {
         let ab_pos = BloodType::ABPositive;
-        
+
         // AB+ can receive from all types
         assert!(BloodType::ONegative.can_donate_to(&ab_pos));
         assert!(BloodType::OPositive.can_donate_to(&ab_pos));
@@ -282,7 +304,7 @@ mod tests {
         assert!(BloodType::APositive.can_donate_to(&BloodType::ABPositive));
         assert!(!BloodType::APositive.can_donate_to(&BloodType::ANegative));
         assert!(!BloodType::APositive.can_donate_to(&BloodType::BPositive));
-        
+
         // B- can donate to B+, B-, AB+, AB-
         assert!(BloodType::BNegative.can_donate_to(&BloodType::BPositive));
         assert!(BloodType::BNegative.can_donate_to(&BloodType::BNegative));
@@ -294,25 +316,25 @@ mod tests {
     #[test]
     fn test_status_transitions_valid() {
         use BloodStatus::*;
-        
+
         // Available transitions
         assert!(Available.can_transition_to(&Reserved));
         assert!(Available.can_transition_to(&Expired));
         assert!(!Available.can_transition_to(&InTransit));
         assert!(!Available.can_transition_to(&Delivered));
-        
+
         // Reserved transitions
         assert!(Reserved.can_transition_to(&InTransit));
         assert!(Reserved.can_transition_to(&Available));
         assert!(Reserved.can_transition_to(&Expired));
         assert!(!Reserved.can_transition_to(&Delivered));
-        
+
         // InTransit transitions
         assert!(InTransit.can_transition_to(&Delivered));
         assert!(InTransit.can_transition_to(&Expired));
         assert!(!InTransit.can_transition_to(&Available));
         assert!(!InTransit.can_transition_to(&Reserved));
-        
+
         // Terminal states
         assert!(!Delivered.can_transition_to(&Expired));
         assert!(!Expired.can_transition_to(&Delivered));
@@ -332,7 +354,7 @@ mod tests {
         let env = Env::default();
         let bank = Address::generate(&env);
         let current_time = 1000u64;
-        
+
         let unit = BloodUnit {
             id: 1,
             blood_type: BloodType::APositive,
@@ -344,7 +366,7 @@ mod tests {
             status: BloodStatus::Available,
             metadata: Map::new(&env),
         };
-        
+
         assert!(unit.validate(current_time).is_ok());
     }
 
@@ -353,7 +375,7 @@ mod tests {
         let env = Env::default();
         let bank = Address::generate(&env);
         let current_time = 1000u64;
-        
+
         let unit = BloodUnit {
             id: 1,
             blood_type: BloodType::APositive,
@@ -365,7 +387,7 @@ mod tests {
             status: BloodStatus::Available,
             metadata: Map::new(&env),
         };
-        
+
         assert_eq!(
             unit.validate(current_time),
             Err(ContractError::InvalidQuantity)
@@ -377,7 +399,7 @@ mod tests {
         let env = Env::default();
         let bank = Address::generate(&env);
         let current_time = 1000u64;
-        
+
         let unit = BloodUnit {
             id: 1,
             blood_type: BloodType::APositive,
@@ -389,7 +411,7 @@ mod tests {
             status: BloodStatus::Available,
             metadata: Map::new(&env),
         };
-        
+
         assert_eq!(
             unit.validate(current_time),
             Err(ContractError::InvalidQuantity)
@@ -401,7 +423,7 @@ mod tests {
         let env = Env::default();
         let bank = Address::generate(&env);
         let current_time = 1000u64;
-        
+
         let unit = BloodUnit {
             id: 1,
             blood_type: BloodType::APositive,
@@ -413,7 +435,7 @@ mod tests {
             status: BloodStatus::Available,
             metadata: Map::new(&env),
         };
-        
+
         assert_eq!(
             unit.validate(current_time),
             Err(ContractError::InvalidTimestamp)
@@ -425,7 +447,7 @@ mod tests {
         let env = Env::default();
         let bank = Address::generate(&env);
         let current_time = 1000u64;
-        
+
         let unit = BloodUnit {
             id: 1,
             blood_type: BloodType::APositive,
@@ -437,7 +459,7 @@ mod tests {
             status: BloodStatus::Available,
             metadata: Map::new(&env),
         };
-        
+
         assert_eq!(
             unit.validate(current_time),
             Err(ContractError::InvalidTimestamp)
@@ -450,7 +472,7 @@ mod tests {
         let bank = Address::generate(&env);
         let donation_time = 1000u64;
         let expiration_time = donation_time + (42 * 24 * 60 * 60);
-        
+
         let unit = BloodUnit {
             id: 1,
             blood_type: BloodType::APositive,
@@ -462,13 +484,13 @@ mod tests {
             status: BloodStatus::Available,
             metadata: Map::new(&env),
         };
-        
+
         // Not expired before expiration time
         assert!(!unit.is_expired(expiration_time - 1));
-        
+
         // Expired at expiration time
         assert!(unit.is_expired(expiration_time));
-        
+
         // Expired after expiration time
         assert!(unit.is_expired(expiration_time + 100));
     }
@@ -479,7 +501,7 @@ mod tests {
         let bank = Address::generate(&env);
         let donation_time = 1000u64;
         let expiration_time = donation_time + 3600; // 1 hour
-        
+
         let unit = BloodUnit {
             id: 1,
             blood_type: BloodType::APositive,
@@ -491,13 +513,13 @@ mod tests {
             status: BloodStatus::Available,
             metadata: Map::new(&env),
         };
-        
+
         // 30 minutes before expiration
         assert_eq!(unit.shelf_life_remaining(donation_time + 1800), 1800);
-        
+
         // At expiration
         assert_eq!(unit.shelf_life_remaining(expiration_time), 0);
-        
+
         // 10 minutes past expiration
         assert_eq!(unit.shelf_life_remaining(expiration_time + 600), -600);
     }
