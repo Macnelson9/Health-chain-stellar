@@ -320,7 +320,6 @@ fn test_register_blood_edge_case_expiration() {
     assert_eq!(unit2.expiration_timestamp, max_expiration);
 }
 
-
 #[test]
 fn test_update_status_available_to_reserved() {
     let (env, admin, client, _contract_id) = create_test_contract();
@@ -422,12 +421,7 @@ fn test_update_status_unauthorized() {
     let unauthorized = Address::generate(&env);
 
     // Try to update without authorization
-    client.update_status(
-        &unit_id,
-        &BloodStatus::Reserved,
-        &unauthorized,
-        &None,
-    );
+    client.update_status(&unit_id, &BloodStatus::Reserved, &unauthorized, &None);
 }
 
 #[test]
@@ -436,12 +430,7 @@ fn test_update_status_nonexistent_unit() {
     let (env, admin, client, _contract_id) = create_test_contract();
 
     // Try to update unit that doesn't exist
-    client.update_status(
-        &999,
-        &BloodStatus::Reserved,
-        &admin,
-        &None,
-    );
+    client.update_status(&999, &BloodStatus::Reserved, &admin, &None);
 }
 
 #[test]
@@ -460,12 +449,7 @@ fn test_update_status_expired_unit() {
     env.ledger().set_timestamp(expiration + 100);
 
     // Try to update expired unit
-    client.update_status(
-        &unit_id,
-        &BloodStatus::Reserved,
-        &admin,
-        &None,
-    );
+    client.update_status(&unit_id, &BloodStatus::Reserved, &admin, &None);
 }
 
 #[test]
@@ -481,32 +465,12 @@ fn test_update_status_from_terminal_delivered() {
     let unit_id = client.register_blood(&bank, &BloodType::APositive, &450u32, &expiration, &None);
 
     // Move to Delivered
-    client.update_status(
-        &unit_id,
-        &BloodStatus::Reserved,
-        &admin,
-        &None,
-    );
-    client.update_status(
-        &unit_id,
-        &BloodStatus::InTransit,
-        &admin,
-        &None,
-    );
-    client.update_status(
-        &unit_id,
-        &BloodStatus::Delivered,
-        &admin,
-        &None,
-    );
+    client.update_status(&unit_id, &BloodStatus::Reserved, &admin, &None);
+    client.update_status(&unit_id, &BloodStatus::InTransit, &admin, &None);
+    client.update_status(&unit_id, &BloodStatus::Delivered, &admin, &None);
 
     // Try to update from terminal state
-    client.update_status(
-        &unit_id,
-        &BloodStatus::Expired,
-        &admin,
-        &None,
-    );
+    client.update_status(&unit_id, &BloodStatus::Expired, &admin, &None);
 }
 
 // ==================== Mark Delivered Tests ====================
@@ -527,11 +491,7 @@ fn test_mark_delivered_success() {
     client.update_status(&unit_id, &BloodStatus::InTransit, &admin, &None);
 
     // Mark as delivered
-    let updated = client.mark_delivered(
-        &unit_id,
-        &admin,
-        &String::from_str(&env, "Hospital A"),
-    );
+    let updated = client.mark_delivered(&unit_id, &admin, &String::from_str(&env, "Hospital A"));
 
     assert_eq!(updated.status, BloodStatus::Delivered);
 }
@@ -605,11 +565,26 @@ fn test_status_history_tracking() {
     let unit_id = client.register_blood(&bank, &BloodType::APositive, &450u32, &expiration, &None);
 
     // Perform status changes
-    client.update_status(&unit_id, &BloodStatus::Reserved, &admin, &Some(String::from_str(&env, "Reserved")));
+    client.update_status(
+        &unit_id,
+        &BloodStatus::Reserved,
+        &admin,
+        &Some(String::from_str(&env, "Reserved")),
+    );
     env.ledger().set_timestamp(current_time + 100);
-    client.update_status(&unit_id, &BloodStatus::InTransit, &admin, &Some(String::from_str(&env, "In transit")));
+    client.update_status(
+        &unit_id,
+        &BloodStatus::InTransit,
+        &admin,
+        &Some(String::from_str(&env, "In transit")),
+    );
     env.ledger().set_timestamp(current_time + 200);
-    client.update_status(&unit_id, &BloodStatus::Delivered, &admin, &Some(String::from_str(&env, "Delivered")));
+    client.update_status(
+        &unit_id,
+        &BloodStatus::Delivered,
+        &admin,
+        &Some(String::from_str(&env, "Delivered")),
+    );
 
     // Get history
     let history = client.get_status_history(&unit_id);
@@ -704,15 +679,13 @@ fn test_batch_update_status_single_unit() {
     let unit_id = client.register_blood(&bank, &BloodType::APositive, &450u32, &expiration, &None);
 
     let unit_ids = vec![&env, unit_id];
-    let count = client.batch_update_status(
-        &unit_ids,
-        &BloodStatus::Reserved,
-        &admin,
-        &None,
-    );
+    let count = client.batch_update_status(&unit_ids, &BloodStatus::Reserved, &admin, &None);
 
     assert_eq!(count, 1);
-    assert_eq!(client.get_blood_unit(&unit_id).status, BloodStatus::Reserved);
+    assert_eq!(
+        client.get_blood_unit(&unit_id).status,
+        BloodStatus::Reserved
+    );
 }
 
 #[test]
@@ -720,12 +693,7 @@ fn test_batch_update_status_empty_list() {
     let (env, admin, client, _contract_id) = create_test_contract();
 
     let empty_list = vec![&env];
-    let count = client.batch_update_status(
-        &empty_list,
-        &BloodStatus::Reserved,
-        &admin,
-        &None,
-    );
+    let count = client.batch_update_status(&empty_list, &BloodStatus::Reserved, &admin, &None);
 
     assert_eq!(count, 0);
 }
@@ -744,12 +712,7 @@ fn test_batch_update_status_nonexistent_unit() {
 
     // Try batch update with one nonexistent unit
     let unit_ids = vec![&env, unit_id, 999];
-    client.batch_update_status(
-        &unit_ids,
-        &BloodStatus::Reserved,
-        &admin,
-        &None,
-    );
+    client.batch_update_status(&unit_ids, &BloodStatus::Reserved, &admin, &None);
 }
 
 #[test]
@@ -767,12 +730,7 @@ fn test_batch_update_status_unauthorized() {
     let unauthorized = Address::generate(&env);
 
     let unit_ids = vec![&env, unit_id];
-    client.batch_update_status(
-        &unit_ids,
-        &BloodStatus::Reserved,
-        &unauthorized,
-        &None,
-    );
+    client.batch_update_status(&unit_ids, &BloodStatus::Reserved, &unauthorized, &None);
 }
 
 #[test]

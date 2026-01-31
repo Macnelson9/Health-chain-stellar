@@ -439,7 +439,13 @@ impl HealthChainContract {
         env.storage().persistent().set(&BLOOD_UNITS, &units);
 
         // Record status change
-        Self::record_status_change(&env, unit_id, old_status, BloodStatus::Reserved, bank_id.clone());
+        Self::record_status_change(
+            &env,
+            unit_id,
+            old_status,
+            BloodStatus::Reserved,
+            bank_id.clone(),
+        );
 
         // Emit event
         env.events().publish(
@@ -509,7 +515,13 @@ impl HealthChainContract {
             units.set(unit_id, unit.clone());
 
             // Record status change
-            Self::record_status_change(&env, unit_id, old_status, BloodStatus::Reserved, bank_id.clone());
+            Self::record_status_change(
+                &env,
+                unit_id,
+                old_status,
+                BloodStatus::Reserved,
+                bank_id.clone(),
+            );
 
             // Emit event
             env.events().publish(
@@ -560,13 +572,17 @@ impl HealthChainContract {
         env.storage().persistent().set(&BLOOD_UNITS, &units);
 
         // Record status change
-        Self::record_status_change(&env, unit_id, old_status, BloodStatus::Available, bank_id.clone());
+        Self::record_status_change(
+            &env,
+            unit_id,
+            old_status,
+            BloodStatus::Available,
+            bank_id.clone(),
+        );
 
         // Emit event
-        env.events().publish(
-            (symbol_short!("blood"), symbol_short!("cancel")),
-            unit_id,
-        );
+        env.events()
+            .publish((symbol_short!("blood"), symbol_short!("cancel")), unit_id);
 
         Ok(())
     }
@@ -610,7 +626,13 @@ impl HealthChainContract {
         env.storage().persistent().set(&BLOOD_UNITS, &units);
 
         // Record status change
-        Self::record_status_change(&env, unit_id, old_status, BloodStatus::InTransit, bank_id.clone());
+        Self::record_status_change(
+            &env,
+            unit_id,
+            old_status,
+            BloodStatus::InTransit,
+            bank_id.clone(),
+        );
 
         // Emit event
         env.events().publish(
@@ -657,7 +679,13 @@ impl HealthChainContract {
             unit.status = BloodStatus::Expired;
             units.set(unit_id, unit.clone());
             env.storage().persistent().set(&BLOOD_UNITS, &units);
-            Self::record_status_change(&env, unit_id, old_status, BloodStatus::Expired, hospital.clone());
+            Self::record_status_change(
+                &env,
+                unit_id,
+                old_status,
+                BloodStatus::Expired,
+                hospital.clone(),
+            );
             return Err(Error::UnitExpired);
         }
 
@@ -669,7 +697,13 @@ impl HealthChainContract {
         env.storage().persistent().set(&BLOOD_UNITS, &units);
 
         // Record status change
-        Self::record_status_change(&env, unit_id, old_status, BloodStatus::Delivered, hospital.clone());
+        Self::record_status_change(
+            &env,
+            unit_id,
+            old_status,
+            BloodStatus::Delivered,
+            hospital.clone(),
+        );
 
         // Emit event
         env.events().publish(
@@ -716,7 +750,13 @@ impl HealthChainContract {
         env.storage().persistent().set(&BLOOD_UNITS, &units);
 
         // Record status change
-        Self::record_status_change(&env, unit_id, old_status, BloodStatus::Discarded, caller.clone());
+        Self::record_status_change(
+            &env,
+            unit_id,
+            old_status,
+            BloodStatus::Discarded,
+            caller.clone(),
+        );
 
         // Emit event
         env.events().publish(
@@ -745,11 +785,7 @@ impl HealthChainContract {
     }
 
     /// Query blood units by status
-    pub fn query_by_status(
-        env: Env,
-        status: BloodStatus,
-        max_results: u32,
-    ) -> Vec<BloodUnit> {
+    pub fn query_by_status(env: Env, status: BloodStatus, max_results: u32) -> Vec<BloodUnit> {
         let units: Map<u64, BloodUnit> = env
             .storage()
             .persistent()
@@ -773,11 +809,7 @@ impl HealthChainContract {
     }
 
     /// Query blood units by hospital
-    pub fn query_by_hospital(
-        env: Env,
-        hospital: Address,
-        max_results: u32,
-    ) -> Vec<BloodUnit> {
+    pub fn query_by_hospital(env: Env, hospital: Address, max_results: u32) -> Vec<BloodUnit> {
         let units: Map<u64, BloodUnit> = env
             .storage()
             .persistent()
@@ -836,10 +868,8 @@ impl HealthChainContract {
         env.storage().persistent().set(&history_key, &history);
 
         // Also emit event
-        env.events().publish(
-            (symbol_short!("status"), symbol_short!("change")),
-            event,
-        );
+        env.events()
+            .publish((symbol_short!("status"), symbol_short!("change")), event);
     }
 
     /// Check if an address is an authorized hospital
@@ -967,7 +997,7 @@ impl HealthChainContract {
         let mut request = requests.get(request_id).ok_or(Error::UnitNotFound)?;
 
         let caller = env.current_contract_address();
-        
+
         // Validate status transition
         if !Self::is_valid_status_transition(&request.status, &new_status) {
             return Err(Error::InvalidTransition);
@@ -986,11 +1016,7 @@ impl HealthChainContract {
     }
 
     /// Cancel blood request
-    pub fn cancel_request(
-        env: Env,
-        request_id: u64,
-        reason: String,
-    ) -> Result<(), Error> {
+    pub fn cancel_request(env: Env, request_id: u64, reason: String) -> Result<(), Error> {
         let mut requests: Map<u64, BloodRequest> = env
             .storage()
             .persistent()
@@ -998,7 +1024,7 @@ impl HealthChainContract {
             .unwrap_or(Map::new(&env));
 
         let mut request = requests.get(request_id).ok_or(Error::UnitNotFound)?;
-        
+
         // Authorization: only hospital that created the request or blood bank can cancel
         let caller = env.current_contract_address();
         let is_hospital = Self::is_hospital(env.clone(), request.hospital_id.clone());
@@ -1009,7 +1035,8 @@ impl HealthChainContract {
         }
 
         // Can only cancel if Pending, Approved, or InProgress
-        if request.status == RequestStatus::Fulfilled || request.status == RequestStatus::Cancelled {
+        if request.status == RequestStatus::Fulfilled || request.status == RequestStatus::Cancelled
+        {
             return Err(Error::InvalidStatus);
         }
 
@@ -1042,17 +1069,20 @@ impl HealthChainContract {
         env.storage().persistent().set(&REQUESTS, &requests);
 
         // Record and emit status change
-        Self::record_request_status_change(&env, request_id, old_status, RequestStatus::Cancelled, caller, Some(reason));
+        Self::record_request_status_change(
+            &env,
+            request_id,
+            old_status,
+            RequestStatus::Cancelled,
+            caller,
+            Some(reason),
+        );
 
         Ok(())
     }
 
     /// Fulfill blood request
-    pub fn fulfill_request(
-        env: Env,
-        request_id: u64,
-        unit_ids: Vec<u64>,
-    ) -> Result<(), Error> {
+    pub fn fulfill_request(env: Env, request_id: u64, unit_ids: Vec<u64>) -> Result<(), Error> {
         let mut requests: Map<u64, BloodRequest> = env
             .storage()
             .persistent()
@@ -1060,7 +1090,7 @@ impl HealthChainContract {
             .unwrap_or(Map::new(&env));
 
         let mut request = requests.get(request_id).ok_or(Error::UnitNotFound)?;
-        
+
         // Authorization: only blood banks can fulfill requests
         let caller = env.current_contract_address();
         if !Self::is_blood_bank(env.clone(), caller.clone()) {
@@ -1068,7 +1098,8 @@ impl HealthChainContract {
         }
 
         // Can only fulfill if Approved or InProgress
-        if request.status != RequestStatus::Approved && request.status != RequestStatus::InProgress {
+        if request.status != RequestStatus::Approved && request.status != RequestStatus::InProgress
+        {
             return Err(Error::InvalidStatus);
         }
 
@@ -1097,7 +1128,13 @@ impl HealthChainContract {
             units.set(unit_id, unit.clone());
 
             // Record blood unit status change
-            Self::record_status_change(&env, unit_id, old_status, BloodStatus::Delivered, caller.clone());
+            Self::record_status_change(
+                &env,
+                unit_id,
+                old_status,
+                BloodStatus::Delivered,
+                caller.clone(),
+            );
         }
 
         env.storage().persistent().set(&BLOOD_UNITS, &units);
@@ -1112,7 +1149,14 @@ impl HealthChainContract {
         env.storage().persistent().set(&REQUESTS, &requests);
 
         // Record and emit status change
-        Self::record_request_status_change(&env, request_id, old_status, RequestStatus::Fulfilled, caller, None);
+        Self::record_request_status_change(
+            &env,
+            request_id,
+            old_status,
+            RequestStatus::Fulfilled,
+            caller,
+            None,
+        );
 
         Ok(())
     }
@@ -1124,20 +1168,20 @@ impl HealthChainContract {
             (RequestStatus::Pending, RequestStatus::Approved) => true,
             (RequestStatus::Pending, RequestStatus::Rejected) => true,
             (RequestStatus::Pending, RequestStatus::Cancelled) => true,
-            
+
             // From Approved
             (RequestStatus::Approved, RequestStatus::InProgress) => true,
             (RequestStatus::Approved, RequestStatus::Cancelled) => true,
-            
+
             // From InProgress
             (RequestStatus::InProgress, RequestStatus::Fulfilled) => true,
             (RequestStatus::InProgress, RequestStatus::Cancelled) => true,
-            
+
             // No transitions from terminal states
             (RequestStatus::Fulfilled, _) => false,
             (RequestStatus::Cancelled, _) => false,
             (RequestStatus::Rejected, _) => false,
-            
+
             // Any other transition is invalid
             _ => false,
         }
@@ -1161,10 +1205,8 @@ impl HealthChainContract {
             reason,
         };
 
-        env.events().publish(
-            (symbol_short!("request"), symbol_short!("status")),
-            event,
-        );
+        env.events()
+            .publish((symbol_short!("request"), symbol_short!("status")), event);
     }
 
     /// Store a health record hash
@@ -1296,9 +1338,10 @@ impl HealthChainContract {
 
         // Sum up available quantities for the blood type (Available status and non-expired only)
         for (_, unit) in units.iter() {
-            if unit.blood_type == blood_type 
+            if unit.blood_type == blood_type
                 && unit.status == BloodStatus::Available
-                && unit.expiration_date > current_time {
+                && unit.expiration_date > current_time
+            {
                 total_quantity = total_quantity.saturating_add(unit.quantity);
 
                 // Early exit if we've found enough
@@ -2400,7 +2443,7 @@ mod test {
     }
 
     // Request Status Management Tests
-    
+
     #[test]
     fn test_update_request_status_pending_to_approved() {
         let env = Env::default();
@@ -2496,11 +2539,11 @@ mod test {
 
         client.update_request_status(&request_id, &RequestStatus::Approved);
         client.update_request_status(&request_id, &RequestStatus::InProgress);
-        
+
         // Manually fulfill by creating a dummy fulfilled state
         // For this test, we'll use cancel and then try to update cancelled
         client.cancel_request(&request_id, &String::from_str(&env, "Test"));
-        
+
         // Try to update from Cancelled (terminal state)
         client.update_request_status(&request_id, &RequestStatus::Pending);
     }
@@ -2518,7 +2561,7 @@ mod test {
         // Add blood units
         let current_time = env.ledger().timestamp();
         let expiration = current_time + (7 * 86400);
-        
+
         let unit_id_1 = client.register_blood(
             &bank,
             &BloodType::OPositive,
@@ -2585,10 +2628,10 @@ mod test {
         // Move to Fulfilled
         client.update_request_status(&request_id, &RequestStatus::Approved);
         client.update_request_status(&request_id, &RequestStatus::InProgress);
-        
+
         // We can't actually fulfill without blood bank, so let's just cancel an already cancelled
         client.cancel_request(&request_id, &String::from_str(&env, "First cancel"));
-        
+
         // Try to cancel again (should fail because it's already Cancelled)
         client.cancel_request(&request_id, &String::from_str(&env, "Second cancel"));
     }
@@ -2606,7 +2649,7 @@ mod test {
         // Add blood units
         let current_time = env.ledger().timestamp();
         let expiration = current_time + (7 * 86400);
-        
+
         let unit_id_1 = client.register_blood(
             &bank,
             &BloodType::APositive,
@@ -2749,7 +2792,7 @@ mod test {
         );
 
         client.update_request_status(&request_id, &RequestStatus::Approved);
-        
+
         // Cancel from Approved state
         client.cancel_request(&request_id, &String::from_str(&env, "Changed requirements"));
 
@@ -2770,7 +2813,7 @@ mod test {
         // Add blood unit
         let current_time = env.ledger().timestamp();
         let expiration = current_time + (7 * 86400);
-        
+
         let unit_id = client.register_blood(
             &bank,
             &BloodType::BPositive,
@@ -2868,4 +2911,3 @@ mod test {
         client.fulfill_request(&999u64, &unit_ids);
     }
 }
-

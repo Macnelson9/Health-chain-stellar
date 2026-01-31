@@ -16,6 +16,10 @@ use soroban_sdk::{contract, contractimpl, Address, Env, Map, String, Vec};
 use crate::error::ContractError;
 use crate::types::{BloodRequest, BloodType, RequestMetadata, RequestStatus, UrgencyLevel};
 
+// Pagination constants
+const DEFAULT_QUERY_LIMIT: u32 = 50;
+const MAX_QUERY_LIMIT: u32 = 200;
+
 #[contract]
 pub struct RequestContract;
 
@@ -448,6 +452,239 @@ impl RequestContract {
     /// true if authorized, false otherwise
     pub fn is_hospital_authorized(env: Env, hospital: Address) -> bool {
         storage::is_authorized_hospital(&env, &hospital)
+    }
+
+    // ========== Advanced Query Functions ==========
+
+    /// Get a blood request by ID
+    ///
+    /// # Arguments
+    /// * `env` - Contract environment
+    /// * `request_id` - ID of the request to retrieve
+    ///
+    /// # Returns
+    /// Option containing the blood request if found, None otherwise
+    pub fn get_request_by_id(env: Env, request_id: u64) -> Option<BloodRequest> {
+        storage::get_blood_request(&env, request_id)
+    }
+
+    /// Query hospital requests with optional status filtering and pagination
+    ///
+    /// # Arguments
+    /// * `env` - Contract environment
+    /// * `hospital_id` - Hospital address to query
+    /// * `status_filter` - Optional status filter (None returns all statuses)
+    /// * `limit` - Maximum number of results (defaults to 50, max 200)
+    /// * `offset` - Number of results to skip
+    ///
+    /// # Returns
+    /// Vector of blood requests matching the criteria
+    pub fn query_hospital_requests(
+        env: Env,
+        hospital_id: Address,
+        status_filter: Option<RequestStatus>,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Vec<BloodRequest> {
+        // Get all request IDs for this hospital
+        let request_ids = storage::get_requests_by_hospital(&env, &hospital_id);
+        
+        // Load full request objects
+        let mut requests = Self::load_requests_from_ids(&env, request_ids);
+        
+        // Apply status filter if provided
+        if let Some(status) = status_filter {
+            requests = requests.into_iter()
+                .filter(|r| r.status == status)
+                .collect();
+        }
+        
+        // Apply pagination
+        Self::apply_pagination(requests, limit, offset)
+    }
+
+    /// Query all pending requests across hospitals, sorted by urgency
+    ///
+    /// # Arguments
+    /// * `env` - Contract environment
+    /// * `limit` - Maximum number of results (defaults to 50, max 200)
+    /// * `offset` - Number of results to skip
+    ///
+    /// # Returns
+    /// Vector of pending requests, sorted by urgency (Critical > Urgent > Normal)
+    pub fn query_pending_requests(
+        env: Env,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Vec<BloodRequest> {
+        // Get all pending request IDs
+        let request_ids = storage::get_requests_by_status(&env, RequestStatus::Pending);
+        
+        // Load full request objects
+        let mut requests = Self::load_requests_from_ids(&env, request_ids);
+        
+        // Sort by urgency (Critical > Urgent > Normal)
+        Self::sort_requests_by_urgency(&mut requests);
+        
+        // Apply pagination
+        Self::apply_pagination(requests, limit, offset)
+    }
+
+    /// Query requests by date range with optional status filtering
+    ///
+    /// # Arguments
+    /// * `env` - Contract environment
+    /// * `start_time` - Start of time range (unix timestamp)
+    /// * `end_time` - End of time range (unix timestamp)
+    /// * `status_filter` - Optional status filter
+    /// * `limit` - Maximum number of results (defaults to 50, max 200)
+    /// * `offset` - Number of results to skip
+    ///
+    /// # Returns
+    /// Vector of requests created within the time range
+    pub fn query_requests_by_date_range(
+        env: Env,
+        start_time: u64,
+        end_time: u64,
+        status_filter: Option<RequestStatus>,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Vec<BloodRequest> {
+        // Collect request IDs based on status filter
+        let request_ids = if let Some(status) = status_filter {
+            storage::get_requests_by_status(&env, status)
+        } else {
+            // If no status filter, we need to check all statuses
+            // This is less efficient but necessary without a date index
+            let mut all_ids = Vec::new(&env);
+            for status in [
+                RequestStatus::Pending,
+                RequestStatus::Approved,
+                RequestStatus::Fulfilled,
+                RequestStatus::InDelivery,
+                RequestStatus::Completed,
+                RequestStatus::Cancelled,
+                RequestStatus::Expired,
+            ] {
+                let ids = storage::get_requests_by_status(&env, status);
+                for id in ids.iter() {
+                    all_ids.push_back(id);
+                }
+            }
+            all_ids
+        };
+        
+        // Load requests and filter by date range
+        let requests = Self::load_requests_from_ids(&env, request_ids)
+            .into_iter()
+            .filter(|r| r.created_at >= start_time && r.created_at <= end_time)
+            .collect();
+        
+        // Apply pagination
+        Self::apply_pagination(requests, limit, offset)
+    }
+
+    /// Query requests by urgency with optional status filtering
+    ///
+    /// # Arguments
+    /// * `env` - Contract environment
+    /// * `urgency` - Urgency level to filter by
+    /// * `status_filter` - Optional status filter
+    /// * `limit` - Maximum number of results (defaults to 50, max 200)
+    /// * `offset` - Number of results to skip
+    ///
+    /// # Returns
+    /// Vector of requests matching the urgency and optional status
+    pub fn query_requests_by_urgency_and_status(
+        env: Env,
+        urgency: UrgencyLevel,
+        status_filter: Option<RequestStatus>,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Vec<BloodRequest> {
+        // Get request IDs by urgency
+        let request_ids = storage::get_requests_by_urgency(&env, urgency);
+        
+        // Load full request objects
+        let mut requests = Self::load_requests_from_ids(&env, request_ids);
+        
+        // Apply status filter if provided
+        if let Some(status) = status_filter {
+            requests = requests.into_iter()
+                .filter(|r| r.status == status)
+                .collect();
+        }
+        
+        // Apply pagination
+        Self::apply_pagination(requests, limit, offset)
+    }
+
+    // ========== Helper Functions ==========
+
+    /// Load full BloodRequest objects from a vector of request IDs
+    fn load_requests_from_ids(env: &Env, ids: Vec<u64>) -> Vec<BloodRequest> {
+        let mut requests = Vec::new(env);
+        for id in ids.iter() {
+            if let Some(request) = storage::get_blood_request(env, id) {
+                requests.push_back(request);
+            }
+        }
+        requests
+    }
+
+    /// Apply pagination to a vector of requests
+    fn apply_pagination(
+        requests: Vec<BloodRequest>,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Vec<BloodRequest> {
+        let env = requests.env();
+        let offset_val = offset.unwrap_or(0) as usize;
+        let limit_val = limit.unwrap_or(DEFAULT_QUERY_LIMIT).min(MAX_QUERY_LIMIT) as usize;
+        
+        let total = requests.len() as usize;
+        
+        // If offset is beyond the length, return empty vector
+        if offset_val >= total {
+            return Vec::new(&env);
+        }
+        
+        // Calculate end index
+        let end = (offset_val + limit_val).min(total);
+        
+        // Slice the vector
+        let mut result = Vec::new(&env);
+        for i in offset_val..end {
+            if let Some(request) = requests.get(i as u32) {
+                result.push_back(request);
+            }
+        }
+        
+        result
+    }
+
+    /// Sort requests by urgency (Critical > Urgent > Normal)
+    fn sort_requests_by_urgency(requests: &mut Vec<BloodRequest>) {
+        // Manual bubble sort since we can't use standard sort with Soroban Vec
+        let len = requests.len();
+        if len <= 1 {
+            return;
+        }
+        
+        for i in 0..len {
+            for j in 0..(len - i - 1) {
+                let curr = requests.get(j).unwrap();
+                let next = requests.get(j + 1).unwrap();
+                
+                // Sort by urgency (higher priority first)
+                if curr.urgency.priority_weight() < next.urgency.priority_weight() {
+                    // Swap
+                    let temp = curr.clone();
+                    requests.set(j, next);
+                    requests.set(j + 1, temp);
+                }
+            }
+        }
     }
 }
 

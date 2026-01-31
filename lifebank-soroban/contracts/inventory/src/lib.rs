@@ -141,7 +141,6 @@ impl InventoryContract {
         storage::get_blood_unit(&env, blood_unit_id).ok_or(ContractError::NotFound)
     }
 
-
     pub fn update_status(
         env: Env,
         unit_id: u64,
@@ -156,8 +155,8 @@ impl InventoryContract {
             return Err(ContractError::Unauthorized);
         }
 
-        let mut blood_unit = storage::get_blood_unit(&env, unit_id)
-            .ok_or(ContractError::NotFound)?;
+        let mut blood_unit =
+            storage::get_blood_unit(&env, unit_id).ok_or(ContractError::NotFound)?;
 
         let current_time = env.ledger().timestamp();
 
@@ -196,7 +195,6 @@ impl InventoryContract {
         Ok(blood_unit)
     }
 
-    
     pub fn mark_delivered(
         env: Env,
         unit_id: u64,
@@ -212,7 +210,6 @@ impl InventoryContract {
         )
     }
 
-   
     pub fn mark_expired(
         env: Env,
         unit_id: u64,
@@ -247,8 +244,8 @@ impl InventoryContract {
 
         for i in 0..unit_ids.len() {
             let unit_id = unit_ids.get(i).ok_or(ContractError::NotFound)?;
-            let mut blood_unit = storage::get_blood_unit(&env, unit_id)
-                .ok_or(ContractError::NotFound)?;
+            let mut blood_unit =
+                storage::get_blood_unit(&env, unit_id).ok_or(ContractError::NotFound)?;
 
             if blood_unit.is_expired(current_time) {
                 return Err(ContractError::BloodUnitExpired);
@@ -288,10 +285,7 @@ impl InventoryContract {
         Ok(updated_count)
     }
 
-    pub fn get_status_history(
-        env: Env,
-        unit_id: u64,
-    ) -> Vec<crate::types::StatusChangeHistory> {
+    pub fn get_status_history(env: Env, unit_id: u64) -> Vec<crate::types::StatusChangeHistory> {
         storage::get_status_history(&env, unit_id)
     }
 

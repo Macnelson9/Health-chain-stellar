@@ -1596,3 +1596,615 @@ fn test_normal_request_insufficient_time() {
     assert_eq!(request.fulfilled_at, None);
     assert_eq!(request.delivery_address, delivery_address);
 }
+
+// ========== Advanced Query Function Tests ==========
+
+#[test]
+fn test_get_request_by_id_exists() {
+    let (env, admin, client, _contract_id) = create_test_contract();
+
+    let patient = Address::generate(&env);
+    let current_time = 1000u64;
+    env.ledger().set_timestamp(current_time);
+
+    let delivery_address = String::from_str(&env, "Hospital");
+    let procedure = String::from_str(&env, "Surgery");
+    let notes = String::from_str(&env, "Notes");
+
+    let request_id = client.create_request(
+        &admin,
+        &BloodType::OPositive,
+        &450u32,
+        &UrgencyLevel::Urgent,
+        &(current_time + 86400),
+        &delivery_address,
+        &patient,
+        &procedure,
+        &notes,
+    );
+
+    // Test get_request_by_id
+    let result = client.get_request_by_id(&request_id);
+    assert!(result.is_some());
+    
+    let request = result.unwrap();
+    assert_eq!(request.id, request_id);
+    assert_eq!(request.blood_type, BloodType::OPositive);
+}
+
+#[test]
+fn test_get_request_by_id_non_existent() {
+    let (_env, _admin, client, _contract_id) = create_test_contract();
+
+    // Test for non-existent request
+    let result = client.get_request_by_id(&999u64);
+    assert!(result.is_none());
+}
+
+#[test]
+fn test_query_hospital_requests_all() {
+    let (env, admin, client, _contract_id) = create_test_contract();
+
+    let hospital = setup_authorized_hospital(&env, &client);
+    let patient = Address::generate(&env);
+    
+    let current_time = 1000u64;
+    env.ledger().set_timestamp(current_time);
+
+    let delivery_address = String::from_str(&env, "Hospital");
+    let procedure = String::from_str(&env, "Surgery");
+    let notes = String::from_str(&env, "Notes");
+
+    // Create multiple requests for the same hospital
+    client.create_request(
+        &hospital,
+        &BloodType::OPositive,
+        &450u32,
+        &UrgencyLevel::Urgent,
+        &(current_time + 86400),
+        &delivery_address,
+        &patient,
+        &procedure,
+        &notes,
+    );
+
+    client.create_request(
+        &hospital,
+        &BloodType::BPositive,
+        &500u32,
+        &UrgencyLevel::Normal,
+        &(current_time + 172800),
+        &delivery_address,
+        &patient,
+        &procedure,
+        &notes,
+    );
+
+    client.create_request(
+        &hospital,
+        &BloodType::ABNegative,
+        &350u32,
+        &UrgencyLevel::Critical,
+        &(current_time + 7200),
+        &delivery_address,
+        &patient,
+        &procedure,
+        &notes,
+    );
+
+    // Query all requests for this hospital (no status filter)
+    let requests = client.query_hospital_requests(&hospital, &None, &None, &None);
+    assert_eq!(requests.len(), 3);
+}
+
+#[test]
+fn test_query_hospital_requests_with_status_filter() {
+    let (env, admin, client, _contract_id) = create_test_contract();
+
+    let hospital = setup_authorized_hospital(&env, &client);
+    let patient = Address::generate(&env);
+    
+    let current_time = 1000u64;
+    env.ledger().set_timestamp(current_time);
+
+    let delivery_address = String::from_str(&env, "Hospital");
+    let procedure = String::from_str(&env, "Surgery");
+    let notes = String::from_str(&env, "Notes");
+
+    // Create requests
+    let req1 = client.create_request(
+        &hospital,
+        &BloodType::OPositive,
+        &450u32,
+        &UrgencyLevel::Urgent,
+        &(current_time + 86400),
+        &delivery_address,
+        &patient,
+        &procedure,
+        &notes,
+    );
+
+    let req2 = client.create_request(
+        &hospital,
+        &BloodType::BPositive,
+        &500u32,
+        &UrgencyLevel::Normal,
+        &(current_time + 172800),
+        &delivery_address,
+        &patient,
+        &procedure,
+        &notes,
+    );
+
+    // Approve one request
+    client.approve_request(&req1);
+
+    // Query pending requests only
+    let pending_requests = client.query_hospital_requests(
+        &hospital,
+        &Some(RequestStatus::Pending),
+        &None,
+        &None,
+    );
+    assert_eq!(pending_requests.len(), 1);
+    assert_eq!(pending_requests.get(0).unwrap().id, req2);
+
+    // Query approved requests only
+    let approved_requests = client.query_hospital_requests(
+        &hospital,
+        &Some(RequestStatus::Approved),
+        &None,
+        &None,
+    );
+    assert_eq!(approved_requests.len(), 1);
+    assert_eq!(approved_requests.get(0).unwrap().id, req1);
+}
+
+#[test]
+fn test_query_hospital_requests_pagination() {
+    let (env, admin, client, _contract_id) = create_test_contract();
+
+    let hospital = setup_authorized_hospital(&env, &client);
+    let patient = Address::generate(&env);
+    
+    let current_time = 1000u64;
+    env.ledger().set_timestamp(current_time);
+
+    let delivery_address = String::from_str(&env, "Hospital");
+    let procedure = String::from_str(&env, "Surgery");
+    let notes = String::from_str(&env, "Notes");
+
+    // Create 5 requests
+    for i in 0..5 {
+        client.create_request(
+            &hospital,
+            &BloodType::OPositive,
+            &450u32,
+            &UrgencyLevel::Normal,
+            &(current_time + 86400 + (i * 1000)),
+            &delivery_address,
+            &patient,
+            &procedure,
+            &notes,
+        );
+    }
+
+    // Test pagination: limit=2, offset=0
+    let page1 = client.query_hospital_requests(&hospital, &None, &Some(2u32), &Some(0u32));
+    assert_eq!(page1.len(), 2);
+
+    // Test pagination: limit=2, offset=2
+    let page2 = client.query_hospital_requests(&hospital, &None, &Some(2u32), &Some(2u32));
+    assert_eq!(page2.len(), 2);
+
+    // Test pagination: limit=2, offset=4
+    let page3 = client.query_hospital_requests(&hospital, &None, &Some(2u32), &Some(4u32));
+    assert_eq!(page3.len(), 1);
+
+    // Verify different pages have different requests
+    assert_ne!(page1.get(0).unwrap().id, page2.get(0).unwrap().id);
+}
+
+#[test]
+fn test_query_hospital_requests_empty() {
+    let (env, _admin, client, _contract_id) = create_test_contract();
+
+    let hospital = setup_authorized_hospital(&env, &client);
+
+    // Query requests for hospital with no requests
+    let requests = client.query_hospital_requests(&hospital, &None, &None, &None);
+    assert_eq!(requests.len(), 0);
+}
+
+#[test]
+fn test_query_pending_requests_sorted_by_urgency() {
+    let (env, admin, client, _contract_id) = create_test_contract();
+
+    let patient = Address::generate(&env);
+    let current_time = 1000u64;
+    env.ledger().set_timestamp(current_time);
+
+    let delivery_address = String::from_str(&env, "Hospital");
+    let procedure = String::from_str(&env, "Surgery");
+    let notes = String::from_str(&env, "Notes");
+
+    // Create requests with different urgencies (in non-sorted order)
+    client.create_request(
+        &admin,
+        &BloodType::OPositive,
+        &450u32,
+        &UrgencyLevel::Normal,  // Priority 1
+        &(current_time + 86400),
+        &delivery_address,
+        &patient,
+        &procedure,
+        &notes,
+    );
+
+    client.create_request(
+        &admin,
+        &BloodType::BPositive,
+        &500u32,
+        &UrgencyLevel::Critical,  // Priority 3
+        &(current_time + 7200),
+        &delivery_address,
+        &patient,
+        &procedure,
+        &notes,
+    );
+
+    client.create_request(
+        &admin,
+        &BloodType::ABNegative,
+        &350u32,
+        &UrgencyLevel::Urgent,  // Priority 2
+        &(current_time + 21600),
+        &delivery_address,
+        &patient,
+        &procedure,
+        &notes,
+    );
+
+    // Query pending requests (should be sorted by urgency)
+    let requests = client.query_pending_requests(&None, &None);
+    assert_eq!(requests.len(), 3);
+
+    // Verify sorting: Critical > Urgent > Normal
+    assert_eq!(requests.get(0).unwrap().urgency, UrgencyLevel::Critical);
+    assert_eq!(requests.get(1).unwrap().urgency, UrgencyLevel::Urgent);
+    assert_eq!(requests.get(2).unwrap().urgency, UrgencyLevel::Normal);
+}
+
+#[test]
+fn test_query_pending_requests_pagination() {
+    let (env, admin, client, _contract_id) = create_test_contract();
+
+    let patient = Address::generate(&env);
+    let current_time = 1000u64;
+    env.ledger().set_timestamp(current_time);
+
+    let delivery_address = String::from_str(&env, "Hospital");
+    let procedure = String::from_str(&env, "Surgery");
+    let notes = String::from_str(&env, "Notes");
+
+    // Create 4 pending requests
+    for _ in 0..4 {
+        client.create_request(
+            &admin,
+            &BloodType::OPositive,
+            &450u32,
+            &UrgencyLevel::Urgent,
+            &(current_time + 86400),
+            &delivery_address,
+            &patient,
+            &procedure,
+            &notes,
+        );
+    }
+
+    // Test pagination
+    let page1 = client.query_pending_requests(&Some(2u32), &Some(0u32));
+    assert_eq!(page1.len(), 2);
+
+    let page2 = client.query_pending_requests(&Some(2u32), &Some(2u32));
+    assert_eq!(page2.len(), 2);
+
+    // Verify different IDs
+    assert_ne!(page1.get(0).unwrap().id, page2.get(0).unwrap().id);
+}
+
+#[test]
+fn test_query_requests_by_date_range() {
+    let (env, admin, client, _contract_id) = create_test_contract();
+
+    let patient = Address::generate(&env);
+    let delivery_address = String::from_str(&env, "Hospital");
+    let procedure = String::from_str(&env, "Surgery");
+    let notes = String::from_str(&env, "Notes");
+
+    // Create requests at different times
+    env.ledger().set_timestamp(1000u64);
+    client.create_request(
+        &admin,
+        &BloodType::OPositive,
+        &450u32,
+        &UrgencyLevel::Normal,
+        &2000u64,
+        &delivery_address,
+        &patient,
+        &procedure,
+        &notes,
+    );
+
+    env.ledger().set_timestamp(5000u64);
+    client.create_request(
+        &admin,
+        &BloodType::BPositive,
+        &500u32,
+        &UrgencyLevel::Urgent,
+        &6000u64,
+        &delivery_address,
+        &patient,
+        &procedure,
+        &notes,
+    );
+
+    env.ledger().set_timestamp(10000u64);
+    client.create_request(
+        &admin,
+        &BloodType::ABNegative,
+        &350u32,
+        &UrgencyLevel::Critical,
+        &11000u64,
+        &delivery_address,
+        &patient,
+        &procedure,
+        &notes,
+    );
+
+    // Query requests created between 1000 and 6000
+    let requests = client.query_requests_by_date_range(
+        &1000u64,
+        &6000u64,
+        &None,
+        &None,
+        &None,
+    );
+    assert_eq!(requests.len(), 2);
+
+    // Query requests created between 5000 and 10000
+    let requests2 = client.query_requests_by_date_range(
+        &5000u64,
+        &10000u64,
+        &None,
+        &None,
+        &None,
+    );
+    assert_eq!(requests2.len(), 2);
+
+    // Query with narrow range
+    let requests3 = client.query_requests_by_date_range(
+        &4000u64,
+        &6000u64,
+        &None,
+        &None,
+        &None,
+    );
+    assert_eq!(requests3.len(), 1);
+}
+
+#[test]
+fn test_query_requests_by_date_range_with_status_filter() {
+    let (env, admin, client, _contract_id) = create_test_contract();
+
+    let patient = Address::generate(&env);
+    let delivery_address = String::from_str(&env, "Hospital");
+    let procedure = String::from_str(&env, "Surgery");
+    let notes = String::from_str(&env, "Notes");
+
+    // Create requests
+    env.ledger().set_timestamp(1000u64);
+    let req1 = client.create_request(
+        &admin,
+        &BloodType::OPositive,
+        &450u32,
+        &UrgencyLevel::Normal,
+        &2000u64,
+        &delivery_address,
+        &patient,
+        &procedure,
+        &notes,
+    );
+
+    env.ledger().set_timestamp(2000u64);
+    client.create_request(
+        &admin,
+        &BloodType::BPositive,
+        &500u32,
+        &UrgencyLevel::Urgent,
+        &3000u64,
+        &delivery_address,
+        &patient,
+        &procedure,
+        &notes,
+    );
+
+    // Approve one request
+    client.approve_request(&req1);
+
+    // Query approved requests in date range
+    let requests = client.query_requests_by_date_range(
+        &1000u64,
+        &2000u64,
+        &Some(RequestStatus::Approved),
+        &None,
+        &None,
+    );
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests.get(0).unwrap().status, RequestStatus::Approved);
+
+    // Query pending requests in date range
+    let pending = client.query_requests_by_date_range(
+        &1000u64,
+        &3000u64,
+        &Some(RequestStatus::Pending),
+        &None,
+        &None,
+    );
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending.get(0).unwrap().status, RequestStatus::Pending);
+}
+
+#[test]
+fn test_query_requests_by_urgency_and_status() {
+    let (env, admin, client, _contract_id) = create_test_contract();
+
+    let patient = Address::generate(&env);
+    let current_time = 1000u64;
+    env.ledger().set_timestamp(current_time);
+
+    let delivery_address = String::from_str(&env, "Hospital");
+    let procedure = String::from_str(&env, "Surgery");
+    let notes = String::from_str(&env, "Notes");
+
+    // Create requests with different urgencies
+    let req1 = client.create_request(
+        &admin,
+        &BloodType::OPositive,
+        &450u32,
+        &UrgencyLevel::Critical,
+        &(current_time + 7200),
+        &delivery_address,
+        &patient,
+        &procedure,
+        &notes,
+    );
+
+    client.create_request(
+        &admin,
+        &BloodType::BPositive,
+        &500u32,
+        &UrgencyLevel::Critical,
+        &(current_time + 7200),
+        &delivery_address,
+        &patient,
+        &procedure,
+        &notes,
+    );
+
+    client.create_request(
+        &admin,
+        &BloodType::ABNegative,
+        &350u32,
+        &UrgencyLevel::Urgent,
+        &(current_time + 21600),
+        &delivery_address,
+        &patient,
+        &procedure,
+        &notes,
+    );
+
+    // Approve one critical request
+    client.approve_request(&req1);
+
+    // Query all critical requests (no status filter)
+    let critical_all = client.query_requests_by_urgency_and_status(
+        &UrgencyLevel::Critical,
+        &None,
+        &None,
+        &None,
+    );
+    assert_eq!(critical_all.len(), 2);
+
+    // Query critical pending requests only
+    let critical_pending = client.query_requests_by_urgency_and_status(
+        &UrgencyLevel::Critical,
+        &Some(RequestStatus::Pending),
+        &None,
+        &None,
+    );
+    assert_eq!(critical_pending.len(), 1);
+
+    // Query critical approved requests only
+    let critical_approved = client.query_requests_by_urgency_and_status(
+        &UrgencyLevel::Critical,
+        &Some(RequestStatus::Approved),
+        &None,
+        &None,
+    );
+    assert_eq!(critical_approved.len(), 1);
+}
+
+#[test]
+fn test_pagination_edge_cases() {
+    let (env, admin, client, _contract_id) = create_test_contract();
+
+    let patient = Address::generate(&env);
+    let current_time = 1000u64;
+    env.ledger().set_timestamp(current_time);
+
+    let delivery_address = String::from_str(&env, "Hospital");
+    let procedure = String::from_str(&env, "Surgery");
+    let notes = String::from_str(&env, "Notes");
+
+    // Create 3 requests
+    for _ in 0..3 {
+        client.create_request(
+            &admin,
+            &BloodType::OPositive,
+            &450u32,
+            &UrgencyLevel::Normal,
+            &(current_time + 86400),
+            &delivery_address,
+            &patient,
+            &procedure,
+            &notes,
+        );
+    }
+
+    // Test: offset beyond length returns empty
+    let result = client.query_pending_requests(&Some(10u32), &Some(10u32));
+    assert_eq!(result.len(), 0);
+
+    // Test: limit =0 returns no results (capped to 0)
+    let result2 = client.query_pending_requests(&Some(0u32), &Some(0u32));
+    assert_eq!(result2.len(), 0);
+
+    // Test: large limit returns all available
+    let result3 = client.query_pending_requests(&Some(100u32), &Some(0u32));
+    assert_eq!(result3.len(), 3);
+}
+
+#[test]
+fn test_max_query_limit_enforcement() {
+    let (env, admin, client, _contract_id) = create_test_contract();
+
+    let patient = Address::generate(&env);
+    let current_time = 1000u64;
+    env.ledger().set_timestamp(current_time);
+
+    let delivery_address = String::from_str(&env, "Hospital");
+    let procedure = String::from_str(&env, "Surgery");
+    let notes = String::from_str(&env, "Notes");
+
+    // Create 10 requests
+    for _ in 0..10 {
+        client.create_request(
+            &admin,
+            &BloodType::OPositive,
+            &450u32,
+            &UrgencyLevel::Normal,
+            &(current_time + 86400),
+            &delivery_address,
+            &patient,
+            &procedure,
+            &notes,
+        );
+    }
+
+    // Request with limit > MAX_QUERY_LIMIT should be capped to MAX_QUERY_LIMIT
+    // MAX_QUERY_LIMIT is 200, so requesting 300 should return at most 10 (all available)
+    let result = client.query_pending_requests(&Some(300u32), &Some(0u32));
+    assert_eq!(result.len(), 10);
+}
+
