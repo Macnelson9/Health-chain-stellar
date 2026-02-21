@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { BullModule } from '@nestjs/bullmq';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 
 import { NotificationEntity } from './entities/notification.entity';
 import { NotificationTemplateEntity } from './entities/notification-template.entity';
@@ -15,6 +16,7 @@ import { InAppProvider } from './providers/in-app.provider';
 import { NotificationProcessor } from './processors/notification.processor';
 import { NotificationsService } from './notifications.service';
 import { NotificationsController } from './notifications.controller';
+import { OrderNotificationListener } from './listeners/order-notification.listener';
 
 @Module({
   imports: [
@@ -22,6 +24,7 @@ import { NotificationsController } from './notifications.controller';
     BullModule.registerQueue({
       name: 'notifications',
     }),
+    EventEmitterModule.forRoot(),
   ],
   controllers: [NotificationsController],
   providers: [
@@ -36,6 +39,9 @@ import { NotificationsController } from './notifications.controller';
 
     // Processors
     NotificationProcessor,
+
+    // Listeners
+    OrderNotificationListener,
 
     // Service
     NotificationsService,
