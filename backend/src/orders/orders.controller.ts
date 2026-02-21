@@ -12,17 +12,49 @@ import {
   Request,
 } from '@nestjs/common';
 import { OrdersService } from './orders.service';
+import { OrderQueryParamsDto } from './dto/order-query-params.dto';
+import { OrdersResponseDto } from './dto/orders-response.dto';
 
 @Controller('orders')
 export class OrdersController {
   constructor(private readonly ordersService: OrdersService) {}
 
   @Get()
-  findAll(
-    @Query('status') status?: string,
-    @Query('hospitalId') hospitalId?: string,
-  ) {
-    return this.ordersService.findAll(status, hospitalId);
+  async findAllWithFilters(
+    @Query(
+      new ValidationPipe({
+        transform: true,
+        whitelist: true,
+        forbidNonWhitelisted: false,
+        exceptionFactory: (errors) => {
+          const messages = errors.map((error) => {
+            const constraints = error.constraints;
+            return constraints
+              ? Object.values(constraints).join(', ')
+              : 'Invalid parameter';
+          });
+          return new BadRequestException({
+            statusCode: 400,
+            message: 'Invalid query parameters',
+            errors: messages,
+          });
+        },
+      }),
+    )
+    params: OrderQueryParamsDto,
+  ): Promise<OrdersResponseDto> {
+    // Additional validation for date range
+    if (params.startDate && params.endDate) {
+      const start = new Date(params.startDate);
+      const end = new Date(params.endDate);
+      if (start > end) {
+        throw new BadRequestException(
+          'startDate must be before or equal to endDate',
+        );
+      }
+    }
+
+    return this.ordersService.findAllWithFilters(params);
   }
 
   @Get(':id')
