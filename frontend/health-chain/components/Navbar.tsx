@@ -45,15 +45,19 @@ export default function Navbar() {
           </Link>
           
           <div className="flex items-center gap-2 cursor-pointer hover:text-brand-loginBtn transition group py-2 relative">
+            <Link href="/auth/signup" className="flex items-center gap-2">
               Register Now 
               <svg width="12" height="8" viewBox="0 0 12 8" fill="none" className="stroke-current transition-transform group-hover:rotate-180">
                 <path d="M1 1.5L6 6.5L11 1.5" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>
+            </Link>
           </div>
           
-          <button className="bg-brand-loginBtn text-[#fffbfb] w-[167px] h-[49px] rounded shadow-md hover:opacity-90 transition font-roboto font-semibold text-base ml-8">
-            Enter App
-          </button>
+          <Link href="/auth/signin">
+            <button className="bg-brand-loginBtn text-[#fffbfb] w-[167px] h-[49px] rounded shadow-md hover:opacity-90 transition font-roboto font-semibold text-base ml-8">
+              Enter App
+            </button>
+          </Link>
         </div>
 
         {/* Mobile Menu Dropdown */}
@@ -62,10 +66,12 @@ export default function Navbar() {
             <Link href="/" onClick={() => setIsOpen(false)} className="text-xl text-brand-black">Home</Link>
             <Link href="#about" onClick={() => setIsOpen(false)} className="text-xl text-brand-black">About Us</Link>
             <Link href="#find" onClick={() => setIsOpen(false)} className="text-xl text-brand-black">Find Blood</Link>
-            <button className="text-xl text-brand-black">Register Now</button>
-            <button className="bg-brand-loginBtn text-[#fffbfb] w-[167px] h-[49px] rounded shadow-md font-roboto font-semibold text-base">
-              Enter App
-            </button>
+            <Link href="/auth/signup" onClick={() => setIsOpen(false)} className="text-xl text-brand-black">Register Now</Link>
+            <Link href="/auth/signin" onClick={() => setIsOpen(false)}>
+              <button className="bg-brand-loginBtn text-[#fffbfb] w-[167px] h-[49px] rounded shadow-md font-roboto font-semibold text-base">
+                Enter App
+              </button>
+            </Link>
           </div>
         )}
 

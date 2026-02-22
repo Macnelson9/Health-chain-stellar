@@ -18,6 +18,10 @@ const config: Config = {
           requestBtn: "#2c2525",
           footer: "#1e2833", 
         },
+        burgundy: {
+          800: '#991b1b',
+          950: '#7f1d1d',
+        },
       },
       backgroundImage: {
         'blood-gradient': 'linear-gradient(135deg, #B32346 0%, #6a0b37 100%)',
