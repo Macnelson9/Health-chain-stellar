@@ -461,6 +461,28 @@ impl HealthChainContract {
         Ok(request_id)
     }
 
+    /// Get all blood units registered by a specific bank
+    pub fn get_units_by_bank(env: Env, bank_id: Address) -> Vec<BloodUnit> {
+        // 1. Get all units from storage.
+        // We use unwrap_or(Map::new(&env)) so it never panics if storage is empty.
+        let units: Map<u64, BloodUnit> = env
+            .storage()
+            .persistent()
+            .get(&BLOOD_UNITS)
+            .unwrap_or(Map::new(&env));
+
+        let mut bank_units = vec![&env];
+
+        // 2. Iterate through all units and filter by bank_id
+        for (_, unit) in units.iter() {
+            if unit.bank_id == bank_id {
+                bank_units.push_back(unit);
+            }
+        }
+
+        bank_units
+    }
+
     /// Helper function to get next ID
     fn get_next_id(env: &Env) -> u64 {
         let id: u64 = env.storage().persistent().get(&NEXT_ID).unwrap_or(1);
@@ -1314,5 +1336,16 @@ mod test {
         let event_data: BloodRequestEvent = last_event.2.into_val(&env);
         assert_eq!(event_data.request_id, req_id);
         assert_eq!(event_data.hospital_id, hospital);
+    }
+
+    #[test]
+    fn test_get_units_by_bank_empty() {
+        let env = Env::default();
+        let (_, _, client) = setup_contract_with_admin(&env);
+        let empty_bank = Address::generate(&env);
+
+        // This should return an empty Vec and NOT panic
+        let results = client.get_units_by_bank(&empty_bank);
+        assert_eq!(results.len(), 0);
     }
 }
