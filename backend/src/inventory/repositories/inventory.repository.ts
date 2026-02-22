@@ -1,0 +1,259 @@
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { InventoryEntity } from '../entities/inventory.entity';
+
+export interface StockAggregation {
+  bloodType: string;
+  totalQuantity: number;
+  totalReserved: number;
+  totalAvailable: number;
+  hospitalCount: number;
+}
+
+export interface LowStockItem {
+  id: string;
+  hospitalId: string;
+  bloodType: string;
+  quantity: number;
+  availableQuantity: number;
+  reorderLevel: number;
+  deficit: number;
+}
+
+export interface InventoryStats {
+  totalItems: number;
+  totalQuantity: number;
+  totalReserved: number;
+  totalAvailable: number;
+  lowStockCount: number;
+  criticalStockCount: number;
+}
+
+@Injectable()
+export class InventoryRepository {
+  constructor(
+    @InjectRepository(InventoryEntity)
+    private readonly repository: Repository<InventoryEntity>,
+  ) {}
+
+  /**
+   * Get aggregated stock levels by blood type across all hospitals
+   * Replaces: SELECT blood_type, SUM(quantity), SUM(reserved_quantity), COUNT(DISTINCT hospital_id) FROM inventory GROUP BY blood_type
+   */
+  async getStockAggregationByBloodType(): Promise<StockAggregation[]> {
+    const results = await this.repository
+      .createQueryBuilder('inventory')
+      .select('inventory.bloodType', 'bloodType')
+      .addSelect('SUM(inventory.quantity)', 'totalQuantity')
+      .addSelect('SUM(inventory.reservedQuantity)', 'totalReserved')
+      .addSelect(
+        'SUM(inventory.quantity - inventory.reservedQuantity)',
+        'totalAvailable',
+      )
+      .addSelect('COUNT(DISTINCT inventory.hospitalId)', 'hospitalCount')
+      .groupBy('inventory.bloodType')
+      .orderBy('inventory.bloodType', 'ASC')
+      .getRawMany();
+
+    return results.map((row) => ({
+      bloodType: row.bloodType,
+      totalQuantity: parseInt(row.totalQuantity, 10) || 0,
+      totalReserved: parseInt(row.totalReserved, 10) || 0,
+      totalAvailable: parseInt(row.totalAvailable, 10) || 0,
+      hospitalCount: parseInt(row.hospitalCount, 10) || 0,
+    }));
+  }
+
+  /**
+   * Get low stock items below reorder level
+   * Replaces: SELECT * FROM inventory WHERE quantity <= reorder_level ORDER BY (quantity - reorder_level) ASC
+   */
+  async getLowStockItems(threshold?: number): Promise<LowStockItem[]> {
+    const queryBuilder = this.repository
+      .createQueryBuilder('inventory')
+      .select([
+        'inventory.id',
+        'inventory.hospitalId',
+        'inventory.bloodType',
+        'inventory.quantity',
+        'inventory.availableQuantity',
+        'inventory.reorderLevel',
+      ]);
+
+    if (threshold !== undefined) {
+      queryBuilder.where('inventory.quantity <= :threshold', { threshold });
+    } else {
+      queryBuilder.where('inventory.quantity <= inventory.reorderLevel');
+    }
+
+    const items = await queryBuilder
+      .orderBy('inventory.quantity - inventory.reorderLevel', 'ASC')
+      .getMany();
+
+    return items.map((item) => ({
+      id: item.id,
+      hospitalId: item.hospitalId,
+      bloodType: item.bloodType,
+      quantity: item.quantity,
+      availableQuantity: item.availableQuantity,
+      reorderLevel: item.reorderLevel,
+      deficit: item.reorderLevel - item.quantity,
+    }));
+  }
+
+  /**
+   * Get critical stock items (below 50% of reorder level)
+   * Replaces: SELECT * FROM inventory WHERE quantity < (reorder_level * 0.5)
+   */
+  async getCriticalStockItems(): Promise<InventoryEntity[]> {
+    return this.repository
+      .createQueryBuilder('inventory')
+      .where('inventory.quantity < (inventory.reorderLevel * 0.5)')
+      .orderBy('inventory.quantity', 'ASC')
+      .getMany();
+  }
+
+  /**
+   * Get inventory statistics for a hospital
+   * Replaces: Complex multi-query aggregation with raw SQL
+   */
+  async getInventoryStats(hospitalId?: string): Promise<InventoryStats> {
+    const queryBuilder = this.repository.createQueryBuilder('inventory');
+
+    if (hospitalId) {
+      queryBuilder.where('inventory.hospitalId = :hospitalId', { hospitalId });
+    }
+
+    const result = await queryBuilder
+      .select('COUNT(*)', 'totalItems')
+      .addSelect('SUM(inventory.quantity)', 'totalQuantity')
+      .addSelect('SUM(inventory.reservedQuantity)', 'totalReserved')
+      .addSelect(
+        'SUM(inventory.quantity - inventory.reservedQuantity)',
+        'totalAvailable',
+      )
+      .addSelect(
+        'COUNT(CASE WHEN inventory.quantity <= inventory.reorderLevel THEN 1 END)',
+        'lowStockCount',
+      )
+      .addSelect(
+        'COUNT(CASE WHEN inventory.quantity < (inventory.reorderLevel * 0.5) THEN 1 END)',
+        'criticalStockCount',
+      )
+      .getRawOne();
+
+    return {
+      totalItems: parseInt(result.totalItems, 10) || 0,
+      totalQuantity: parseInt(result.totalQuantity, 10) || 0,
+      totalReserved: parseInt(result.totalReserved, 10) || 0,
+      totalAvailable: parseInt(result.totalAvailable, 10) || 0,
+      lowStockCount: parseInt(result.lowStockCount, 10) || 0,
+      criticalStockCount: parseInt(result.criticalStockCount, 10) || 0,
+    };
+  }
+
+  /**
+   * Find inventory by hospital and blood type
+   * Replaces: SELECT * FROM inventory WHERE hospital_id = ? AND blood_type = ?
+   */
+  async findByHospitalAndBloodType(
+    hospitalId: string,
+    bloodType: string,
+  ): Promise<InventoryEntity | null> {
+    return this.repository
+      .createQueryBuilder('inventory')
+      .where('inventory.hospitalId = :hospitalId', { hospitalId })
+      .andWhere('inventory.bloodType = :bloodType', { bloodType })
+      .getOne();
+  }
+
+  /**
+   * Get all inventory items for a hospital
+   * Replaces: SELECT * FROM inventory WHERE hospital_id = ? ORDER BY blood_type
+   */
+  async findByHospital(hospitalId: string): Promise<InventoryEntity[]> {
+    return this.repository
+      .createQueryBuilder('inventory')
+      .where('inventory.hospitalId = :hospitalId', { hospitalId })
+      .orderBy('inventory.bloodType', 'ASC')
+      .getMany();
+  }
+
+  /**
+   * Update stock quantity atomically
+   * Replaces: UPDATE inventory SET quantity = quantity + ?, updated_at = NOW() WHERE id = ?
+   */
+  async adjustStock(id: string, delta: number): Promise<void> {
+    await this.repository
+      .createQueryBuilder()
+      .update(InventoryEntity)
+      .set({
+        quantity: () => `quantity + ${delta}`,
+      })
+      .where('id = :id', { id })
+      .execute();
+  }
+
+  /**
+   * Reserve stock for an order
+   * Replaces: UPDATE inventory SET reserved_quantity = reserved_quantity + ? WHERE id = ? AND (quantity - reserved_quantity) >= ?
+   */
+  async reserveStock(id: string, quantity: number): Promise<boolean> {
+    const result = await this.repository
+      .createQueryBuilder()
+      .update(InventoryEntity)
+      .set({
+        reservedQuantity: () => `reserved_quantity + ${quantity}`,
+      })
+      .where('id = :id', { id })
+      .andWhere('(quantity - reserved_quantity) >= :quantity', { quantity })
+      .execute();
+
+    return result.affected > 0;
+  }
+
+  /**
+   * Release reserved stock
+   * Replaces: UPDATE inventory SET reserved_quantity = reserved_quantity - ? WHERE id = ?
+   */
+  async releaseStock(id: string, quantity: number): Promise<void> {
+    await this.repository
+      .createQueryBuilder()
+      .update(InventoryEntity)
+      .set({
+        reservedQuantity: () => `reserved_quantity - ${quantity}`,
+      })
+      .where('id = :id', { id })
+      .andWhere('reserved_quantity >= :quantity', { quantity })
+      .execute();
+  }
+
+  /**
+   * Get inventory items that need reordering grouped by blood type
+   * Replaces: Complex GROUP BY query with HAVING clause
+   */
+  async getReorderSummary(): Promise<
+    Array<{ bloodType: string; totalDeficit: number; affectedHospitals: number }>
+  > {
+    const results = await this.repository
+      .createQueryBuilder('inventory')
+      .select('inventory.bloodType', 'bloodType')
+      .addSelect(
+        'SUM(inventory.reorderLevel - inventory.quantity)',
+        'totalDeficit',
+      )
+      .addSelect('COUNT(DISTINCT inventory.hospitalId)', 'affectedHospitals')
+      .where('inventory.quantity < inventory.reorderLevel')
+      .groupBy('inventory.bloodType')
+      .having('SUM(inventory.reorderLevel - inventory.quantity) > 0')
+      .orderBy('totalDeficit', 'DESC')
+      .getRawMany();
+
+    return results.map((row) => ({
+      bloodType: row.bloodType,
+      totalDeficit: parseInt(row.totalDeficit, 10) || 0,
+      affectedHospitals: parseInt(row.affectedHospitals, 10) || 0,
+    }));
+  }
+}
